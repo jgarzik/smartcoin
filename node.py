@@ -6,10 +6,36 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #
 
+import asyncore
 import hashlib
+import sys
+import re
+import socket
+import time
+import struct
 
 import Log
 import codec_pb2
+
+PROTO_VERSION = 10000
+MIN_PROTO_VERSION = 10000
+MY_SUBVERSION = "/bond-node-0.1/"
+
+settings = {}
+debugnet = True
+
+def verbose_sendmsg(command):
+	if debugnet:
+		return True
+	return True
+
+def verbose_recvmsg(command):
+	skipmsg = { }
+	if debugnet:
+		return True
+	if command in skipmsg:
+		return False
+	return True
 
 class MsgNull(object):
 	def __init__(self):
@@ -29,12 +55,10 @@ class NodeConn(asyncore.dispatcher):
 		"getaddr",
 	}
 
-	def __init__(self, dstaddr, dstport, log, peermgr,
-		     netmagic):
+	def __init__(self, dstaddr, dstport, log, peermgr):
 		asyncore.dispatcher.__init__(self)
 		self.log = log
 		self.peermgr = peermgr
-		self.netmagic = netmagic
 		self.dstaddr = dstaddr
 		self.dstport = dstport
 		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -51,14 +75,10 @@ class NodeConn(asyncore.dispatcher):
 		self.hash_continue = None
 
 		#stuff version msg into sendbuf
-		vt = msg_version()
-		vt.addrTo.ip = self.dstaddr
-		vt.addrTo.port = self.dstport
-		vt.addrFrom.ip = "0.0.0.0"
-		vt.addrFrom.port = 0
-		vt.nStartingHeight = self.chaindb.getheight()
-		vt.strSubVer = MY_SUBVERSION
-		self.send_message(vt, True)
+		vt = codec_pb2.MsgVersion()
+		vt.proto_ver = PROTO_VERSION
+		vt.client_ver = MY_SUBVERSION
+		self.send_message("version", vt, True)
 
 		self.log.write("connecting")
 		try:
@@ -165,7 +185,7 @@ class NodeConn(asyncore.dispatcher):
 		if self.state != "connected" and not pushbuf:
 			return
 
-		if verbose_sendmsg(message):
+		if verbose_sendmsg(command):
 			self.log.write("send %s" % repr(message))
 
 		data = message.SerializeToString()
@@ -184,11 +204,11 @@ class NodeConn(asyncore.dispatcher):
 		self.last_sent = time.time()
 
 	def got_message(self, command, message):
-		if verbose_recvmsg(message):
+		if verbose_recvmsg(command):
 			self.log.write("recv %s" % repr(message))
 
 		if command == "version":
-			self.ver_send = min(PROTO_VERSION, message.nVersion)
+			self.ver_send = min(PROTO_VERSION, message.proto_ver)
 
 			self.send_message("verack", MsgNull())
 
@@ -199,6 +219,23 @@ class NodeConn(asyncore.dispatcher):
 			msgout = codec_pb2.MsgPingPong()
 			msgout.cookie = message.cookie
 			self.send_message("pong", msgout)
+
+		elif command == "addr":
+			self.peermgr.new_addrs(message.peers)
+
+		elif command == "getaddr":
+			peers = self.peermgr.random_addrs()
+			msgout = codec_pb2.MsgAddresses()
+
+			for peer in peers:
+				addr = msgout.peers.add()
+				addr.proto_ver = peer.proto_ver
+				addr.time = peer.time
+				addr.flags = peer.flags
+				addr.ip = peer.ip
+				addr.port = peer.port
+
+			self.send_message("addr", msgout)
 
 class PeerManager(object):
 	def __init__(self, log):
@@ -211,7 +248,7 @@ class PeerManager(object):
 		self.log.write("PeerManager: connecting to %s:%d" %
 			       (host, port))
 		self.tried[host] = True
-		c = NodeConn(host, port, self.log)
+		c = NodeConn(host, port, self.log, self)
 		self.peers.append(c)
 
 	def new_addrs(self, addrs):
@@ -281,12 +318,12 @@ if __name__ == '__main__':
 
 	log.write("\n\n\n\n")
 
-	peermgr = PeerManager(log, mempool, chaindb, netmagic)
+	peermgr = PeerManager(log)
 
 	# start HTTP server for JSON-RPC
-	s = httpsrv.Server('', settings['rpcport'], rpc.RPCRequestHandler,
-			  (log, peermgr, mempool, chaindb,
-			   settings['rpcuser'], settings['rpcpass']))
+	#s = httpsrv.Server('', settings['rpcport'], rpc.RPCRequestHandler,
+	#		  (log, peermgr,
+	#		   settings['rpcuser'], settings['rpcpass']))
 
 	# connect to specified remote node
 	peermgr.add(settings['host'], settings['port'])
