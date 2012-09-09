@@ -1,0 +1,24 @@
+
+package codec;
+
+message MsgVersion {
+	required uint64 proto_ver = 1;
+	required string client_ver = 3;
+}
+
+message MsgPingPong {
+	required uint64 cookie = 1;
+}
+
+message Address {
+	required uint64 proto_ver = 1;
+	required uint64 time = 2;
+	required uint64 flags = 3;
+	required string ip = 4;
+	required uint32 port = 5;
+}
+
+message MsgAddresses {
+	repeated Address peers = 1;
+}
+
