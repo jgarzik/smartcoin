@@ -22,6 +22,8 @@ PROTO_VERSION = 10000
 MIN_PROTO_VERSION = 10000
 MY_SUBVERSION = "/bond-node-0.1/"
 
+NODE_ID = random.getrandbits(64)
+
 settings = {}
 debugnet = True
 
@@ -81,9 +83,7 @@ class NodeConn(asyncore.dispatcher):
 
 		if sock is None:
 			#stuff version msg into sendbuf
-			vt = codec_pb2.MsgVersion()
-			vt.proto_ver = PROTO_VERSION
-			vt.client_ver = MY_SUBVERSION
+			vt = self.version_msg()
 			self.send_message("version", vt, True)
 
 			self.log.write("connecting to " + self.dstaddr)
@@ -91,6 +91,13 @@ class NodeConn(asyncore.dispatcher):
 				self.connect((dstaddr, dstport))
 			except:
 				self.handle_close()
+
+	def version_msg(self):
+		vt = codec_pb2.MsgVersion()
+		vt.proto_ver = PROTO_VERSION
+		vt.client_ver = MY_SUBVERSION
+		vt.node_id = NODE_ID
+		return vt
 
 	def handle_connect(self):
 		self.log.write(self.dstaddr + " connected")
@@ -216,9 +223,7 @@ class NodeConn(asyncore.dispatcher):
 
 			# incoming connections send "version" first
 			if not self.outbound:
-				msgout = codec_pb2.MsgVersion()
-				msgout.proto_ver = PROTO_VERSION
-				msgout.client_ver = MY_SUBVERSION
+				msgout = self.version_msg()
 				self.send_message("version", msgout)
 
 			self.send_message("verack", MsgNull())

@@ -4,6 +4,7 @@ package codec;
 message MsgVersion {
 	required uint64 proto_ver = 1;
 	required string client_ver = 3;
+	required uint64 node_id = 2;
 }
 
 message MsgPingPong {
