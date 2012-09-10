@@ -65,30 +65,28 @@ class NodeConn(asyncore.dispatcher):
 		if sock is None:
 			self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
 			self.state = "connecting"
+			self.outbound = True
 		else:
-			self.dstaddr = '0.0.0.0'
-			self.dstport = 0
+			self.outbound = False
+			if self.dstaddr is None:
+				self.dstaddr = '0.0.0.0'
+			if self.dstport is None:
+				self.dstport = 0
 			self.state = "connected"
 			self.log.write(self.dstaddr + " connected")
 		self.sendbuf = ""
 		self.recvbuf = ""
 		self.ver_send = MIN_PROTO_VERSION
-		self.ver_recv = MIN_PROTO_VERSION
 		self.last_sent = 0
-		self.getblocks_ok = True
-		self.last_block_rx = time.time()
-		self.last_getblocks = 0
-		self.remote_height = -1
-		self.hash_continue = None
 
-		#stuff version msg into sendbuf
-		vt = codec_pb2.MsgVersion()
-		vt.proto_ver = PROTO_VERSION
-		vt.client_ver = MY_SUBVERSION
-		self.send_message("version", vt, True)
-
-		self.log.write("connecting")
 		if sock is None:
+			#stuff version msg into sendbuf
+			vt = codec_pb2.MsgVersion()
+			vt.proto_ver = PROTO_VERSION
+			vt.client_ver = MY_SUBVERSION
+			self.send_message("version", vt, True)
+
+			self.log.write("connecting to " + self.dstaddr)
 			try:
 				self.connect((dstaddr, dstport))
 			except:
@@ -97,13 +95,6 @@ class NodeConn(asyncore.dispatcher):
 	def handle_connect(self):
 		self.log.write(self.dstaddr + " connected")
 		self.state = "connected"
-		#send version msg
-#		t = msg_version()
-#		t.addrTo.ip = self.dstaddr
-#		t.addrTo.port = self.dstport
-#		t.addrFrom.ip = "0.0.0.0"
-#		t.addrFrom.port = 0
-#		self.send_message(t)
 
 	def handle_close(self):
 		self.log.write(self.dstaddr + " close")
@@ -218,6 +209,17 @@ class NodeConn(asyncore.dispatcher):
 
 		if command == "version":
 			self.ver_send = min(PROTO_VERSION, message.proto_ver)
+			if self.ver_send < MIN_PROTO_VERSION:
+				self.log.write("disconnecting unsupported version")
+				self.handle_close()
+				return
+
+			# incoming connections send "version" first
+			if not self.outbound:
+				msgout = codec_pb2.MsgVersion()
+				msgout.proto_ver = PROTO_VERSION
+				msgout.client_ver = MY_SUBVERSION
+				self.send_message("version", msgout)
 
 			self.send_message("verack", MsgNull())
 
@@ -263,7 +265,8 @@ class NodeServer(asyncore.dispatcher):
 		else:
 			sock, addr = pair
 			self.log.write('Incoming connection from %s' % repr(addr))
-			handler = NodeConn(self.log, self.peermgr, sock=sock)
+			handler = NodeConn(self.log, self.peermgr, sock=sock,
+					   dstaddr=addr[0], dstport=addr[1])
 
 class PeerManager(object):
 	def __init__(self, log):
