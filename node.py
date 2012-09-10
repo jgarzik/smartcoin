@@ -17,8 +17,10 @@ import random
 
 import Log
 import codec_pb2
+import rpc
+import httpsrv
+from coredefs import PROTO_VERSION
 
-PROTO_VERSION = 10000
 MIN_PROTO_VERSION = 10000
 MY_SUBVERSION = "/bond-node-0.1/"
 
@@ -379,9 +381,9 @@ if __name__ == '__main__':
 	peermgr = PeerManager(log)
 
 	# start HTTP server for JSON-RPC
-	#s = httpsrv.Server('', settings['rpcport'], rpc.RPCRequestHandler,
-	#		  (log, peermgr,
-	#		   settings['rpcuser'], settings['rpcpass']))
+	s = httpsrv.Server('', settings['rpcport'], rpc.RPCRequestHandler,
+			  (log, peermgr,
+			   settings['rpcuser'], settings['rpcpass']))
 
 	if settings['listen']:
 		p2pserver = NodeServer(settings['listen_host'],
