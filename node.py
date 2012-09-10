@@ -55,13 +55,17 @@ class NodeConn(asyncore.dispatcher):
 		"getaddr",
 	}
 
-	def __init__(self, dstaddr, dstport, log, peermgr):
-		asyncore.dispatcher.__init__(self)
+	def __init__(self, log, peermgr, sock=None, dstaddr=None, dstport=None):
+		asyncore.dispatcher.__init__(self, sock=sock)
 		self.log = log
 		self.peermgr = peermgr
 		self.dstaddr = dstaddr
 		self.dstport = dstport
-		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+		if sock is None:
+			self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+		else:
+			self.dstaddr = '0.0.0.0'
+			self.dstport = 0
 		self.sendbuf = ""
 		self.recvbuf = ""
 		self.ver_send = MIN_PROTO_VERSION
@@ -81,10 +85,11 @@ class NodeConn(asyncore.dispatcher):
 		self.send_message("version", vt, True)
 
 		self.log.write("connecting")
-		try:
-			self.connect((dstaddr, dstport))
-		except:
-			self.handle_close()
+		if sock is None:
+			try:
+				self.connect((dstaddr, dstport))
+			except:
+				self.handle_close()
 
 	def handle_connect(self):
 		self.log.write(self.dstaddr + " connected")
@@ -186,7 +191,7 @@ class NodeConn(asyncore.dispatcher):
 			return
 
 		if verbose_sendmsg(command):
-			self.log.write("send %s" % repr(message))
+			self.log.write("send %s %s" % (command, repr(message)))
 
 		data = message.SerializeToString()
 		tmsg = 'BND1'
@@ -205,7 +210,7 @@ class NodeConn(asyncore.dispatcher):
 
 	def got_message(self, command, message):
 		if verbose_recvmsg(command):
-			self.log.write("recv %s" % repr(message))
+			self.log.write("recv %s %s" % (command, repr(message)))
 
 		if command == "version":
 			self.ver_send = min(PROTO_VERSION, message.proto_ver)
@@ -237,6 +242,25 @@ class NodeConn(asyncore.dispatcher):
 
 			self.send_message("addr", msgout)
 
+class NodeServer(asyncore.dispatcher):
+	def __init__(self, host, port, log, peermgr):
+		asyncore.dispatcher.__init__(self)
+		self.log = log
+		self.peermgr = peermgr
+		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.set_reuse_addr()
+		self.bind((host, port))
+		self.listen(25)
+
+	def handle_accept(self):
+		pair = self.accept()
+		if pair is None:
+			pass
+		else:
+			sock, addr = pair
+			self.log.write('Incoming connection from %s' % repr(addr))
+			handler = NodeConn(self.log, self.peermgr, sock=sock)
+
 class PeerManager(object):
 	def __init__(self, log):
 		self.log = log
@@ -248,7 +272,7 @@ class PeerManager(object):
 		self.log.write("PeerManager: connecting to %s:%d" %
 			       (host, port))
 		self.tried[host] = True
-		c = NodeConn(host, port, self.log, self)
+		c = NodeConn(self.log, self, dstaddr=host, dstport=port)
 		self.peers.append(c)
 
 	def new_addrs(self, addrs):
@@ -278,6 +302,12 @@ class PeerManager(object):
 			peer.handle_close()
 		self.peers = []
 
+def getboolarg(s):
+	if not s:
+		return False
+	if s == '1' or s == 'yes' or s == 'YES' or s == 'Yes':
+		return True
+	return False
 
 if __name__ == '__main__':
 	if len(sys.argv) != 2:
@@ -292,26 +322,34 @@ if __name__ == '__main__':
 		settings[m.group(1)] = m.group(2)
 	f.close()
 
-	if 'host' not in settings:
-		settings['host'] = '127.0.0.1'
-	if 'port' not in settings:
-		settings['port'] = 8333
 	if 'rpcport' not in settings:
 		settings['rpcport'] = 9332
 	if 'db' not in settings:
 		settings['db'] = '/tmp/chaindb'
 	if 'chain' not in settings:
 		settings['chain'] = 'mainnet'
+	if 'listen' not in settings:
+		settings['listen'] = False
+	else:
+		settings['listen'] = getboolarg(settings['listen'])
 	chain = settings['chain']
 	if 'log' not in settings or (settings['log'] == '-'):
 		settings['log'] = None
+
+	if 'port' in settings:
+		settings['port'] = int(settings['port'])
+	if 'listen_port' in settings:
+		settings['listen_port'] = int(settings['listen_port'])
+
+	addnode = ('host' in settings and 'port' in settings)
 
 	if ('rpcuser' not in settings or
 	    'rpcpass' not in settings):
 		print "You must set the following in config: rpcuser, rpcpass"
 		sys.exit(1)
 
-	settings['port'] = int(settings['port'])
+	if 'port' in settings:
+		settings['port'] = int(settings['port'])
 	settings['rpcport'] = int(settings['rpcport'])
 
 	log = Log.Log(settings['log'])
@@ -325,8 +363,14 @@ if __name__ == '__main__':
 	#		  (log, peermgr,
 	#		   settings['rpcuser'], settings['rpcpass']))
 
+	if settings['listen']:
+		p2pserver = NodeServer(settings['listen_host'],
+				       settings['listen_port'],
+				       log, peermgr)
+
 	# connect to specified remote node
-	peermgr.add(settings['host'], settings['port'])
+	if addnode:
+		peermgr.add(settings['host'], settings['port'])
 
 	# program main loop
 	asyncore.loop()
