@@ -13,6 +13,7 @@ import re
 import socket
 import time
 import struct
+import random
 
 import Log
 import codec_pb2
@@ -63,9 +64,12 @@ class NodeConn(asyncore.dispatcher):
 		self.dstport = dstport
 		if sock is None:
 			self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+			self.state = "connecting"
 		else:
 			self.dstaddr = '0.0.0.0'
 			self.dstport = 0
+			self.state = "connected"
+			self.log.write(self.dstaddr + " connected")
 		self.sendbuf = ""
 		self.recvbuf = ""
 		self.ver_send = MIN_PROTO_VERSION
@@ -75,7 +79,6 @@ class NodeConn(asyncore.dispatcher):
 		self.last_block_rx = time.time()
 		self.last_getblocks = 0
 		self.remote_height = -1
-		self.state = "connecting"
 		self.hash_continue = None
 
 		#stuff version msg into sendbuf
@@ -188,6 +191,7 @@ class NodeConn(asyncore.dispatcher):
 
 	def send_message(self, command, message, pushbuf=False):
 		if self.state != "connected" and not pushbuf:
+			self.log.write("WARNING: sending without connection")
 			return
 
 		if verbose_sendmsg(command):
