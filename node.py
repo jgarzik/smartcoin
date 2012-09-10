@@ -47,6 +47,8 @@ class MsgNull(object):
 		return ''
 	def ParseFromString(self, data):
 		pass
+	def __str__(self):
+		return "MsgNull()"
 
 class NodeConn(asyncore.dispatcher):
 	messagemap = {
@@ -193,7 +195,7 @@ class NodeConn(asyncore.dispatcher):
 			return
 
 		if verbose_sendmsg(command):
-			self.log.write("send %s %s" % (command, repr(message)))
+			self.log.write("SEND %s %s" % (command, str(message)))
 
 		data = message.SerializeToString()
 		tmsg = 'BND1'
@@ -212,7 +214,7 @@ class NodeConn(asyncore.dispatcher):
 
 	def got_message(self, command, message):
 		if verbose_recvmsg(command):
-			self.log.write("recv %s %s" % (command, repr(message)))
+			self.log.write("RECV %s %s" % (command, str(message)))
 
 		if command == "version":
 			self.ver_send = min(PROTO_VERSION, message.proto_ver)
