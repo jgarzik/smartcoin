@@ -223,6 +223,12 @@ class NodeConn(asyncore.dispatcher):
 				self.handle_close()
 				return
 
+			# connecting to ourselves?
+			if message.node_id == NODE_ID:
+				self.log.write("disconnecting ourselves")
+				self.handle_close()
+				return
+
 			# incoming connections send "version" first
 			if not self.outbound:
 				msgout = self.version_msg()
