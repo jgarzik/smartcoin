@@ -31,6 +31,12 @@ def valid_key_len(n):
 		return True
 	return False
 
+def matching_bits(v1, v2):
+	for i in xrange(v1.bit_length):
+		if ((v1 & (1 << i)) != (v2 & (1 << i))):
+			return i
+	return v1.bit_length
+
 def bn2bin(v):
 	s = bytearray()
 	i = bn_bytes(v)
@@ -45,10 +51,30 @@ def bin2bn(s):
 		l = (l << 8) | ch
 	return l
 
+def hash_node_id(node_id):
+	node_id_bin = bn2bin(node_id)
+	hash = hashlib.sha256(node_id_bin).digest()
+	return hash
+
 class NodeDist(object):
 	def __init__(self, node_id=0L, distance=0L):
 		self.node_id = node_id
 		self.distance = distance
+
+class DHTNode(object):
+	def __init__(self, node_id=0L, ip=None, port=0, flags=0):
+		self.node_id = node_id
+		self.ip = ip
+		self.port = port
+		self.flags = flags
+		self.last_seen = None
+		self.bucket_idx = -1
+
+class DHTBucket(object):
+	def __init__(self):
+		self.active_max = 20
+		self.active = []
+		self.candidates = []
 
 class DHT(asyncore.dispatcher):
 	messagemap = {
@@ -72,7 +98,13 @@ class DHT(asyncore.dispatcher):
 		self.last_sent = 0
 
 		self.dht_cache = LRU.LRU(100000)
-		self.dht_nodes = {}
+		self.dht_nodes = {}		# key: node_id
+		self.all_nodes = {}		# key: (ip,port) tuple
+
+		self.buckets = []
+		for i in xrange(64):
+			bucket = DHTBucket()
+			self.buckets.append(bucket)
 
 	def handle_connect(self):
 		pass
@@ -211,15 +243,12 @@ class DHT(asyncore.dispatcher):
 		msgout.request_id = message.request_id
 		self.send_message(res, msgout, addr)
 
-	def find_nodes(self, key, want_nid0):
+	def find_nodes(self, key):
 		key_num = bin2bn(key)
 
 		# obtain a distance value for each node, by xor'ing with key
 		dists = []
 		for node in self.dht_nodes.itervalues():
-			if node.node_id == 0 and not want_nid0:
-				continue
-
 			nd = NodeDist(node.node_id, node.node_id ^ key_num)
 			dists.append(nd)
 
@@ -235,10 +264,37 @@ class DHT(asyncore.dispatcher):
 
 		return ret
 
+	def add_node(self, node_msgobj):
+		node = DHTNode(node_msgobj.node_id,
+			       node_msgobj.ip,
+			       node_msgobj.port,
+			       node_msgobj.flags)
+
+		# pick bucket based on number of matching bits
+		# in node idx
+		node.bucket_idx = matching_bits(self.node_id,
+						node_msgobj.node_id)
+
+		# store in ip-indexed master list
+		self.all_nodes[(node.ip, node.port)] = node
+
+		# store in bucket, based on prefix length
+		bucket = self.buckets[node.bucket_idx]
+
+		# if we are actively trying to fill a bucket,
+		# go ahead and put in an unconfirmed peer
+		if len(bucket.active) < bucket.active_max:
+			bucket.active.append(node)
+			self.dht_nodes[node.node_id] = node
+
+		# otherwise, add it to the candidates list
+		else:
+			bucket.candidates.append(node)
+
 	def op_nodes(self, message, addr):
 		for node in message.nodes:
 			if node.node_id not in self.dht_nodes:
-				self.dht_nodes[node.node_id] = node
+				self.add_node(node)
 
 	def op_find_nodes(self, message, addr):
 		if not valid_key_len(len(message.key)):
@@ -250,7 +306,7 @@ class DHT(asyncore.dispatcher):
 		msgout = codec_pb2.MsgDHTNodes()
 		msgout.request_id = message.request_id
 
-		nodes = self.find_nodes(message.key, False)
+		nodes = self.find_nodes(message.key)
 		for node in nodes:
 			node_out = msgout.nodes.add()
 			node_out.node_id = node.node_id
@@ -273,14 +329,9 @@ class DHT(asyncore.dispatcher):
 		self.op_find_nodes(message, addr)
 
 	def bootstrap(self):
-		# search key == sha256(node id)
-		node_id_bin = bn2bin(self.node_id)
-		hash = hashlib.sha256(node_id_bin).digest()
-
 		# send message to nearest nodes (possibly only a handful
 		# of DNS bootstrap nodes)
-		nodes = self.find_nodes(hash, True)
-		for node in nodes:
+		for node in self.all_nodes:
 			# do not send to ourselves
 			if node.node_id == self.node_id:
 				continue
@@ -288,11 +339,5 @@ class DHT(asyncore.dispatcher):
 			msgout = codec_pb2.MsgDHTMisc()
 			msgout.request_id = 1
 			self.send_message("ping", msgout,
-					  (node.ip, node.port))
-
-			msgout = codec_pb2.MsgDHTKey()
-			msgout.request_id = 2
-			msgout.key = hash
-			self.send_message("find-nodes", msgout,
 					  (node.ip, node.port))
 
