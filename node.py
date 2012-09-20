@@ -389,7 +389,7 @@ if __name__ == '__main__':
 			  (log, peermgr,
 			   settings['rpcuser'], settings['rpcpass']))
 
-	dht = dht.DHTServer(log, settings['dhtport'])
+	dht = dht.DHTServer(log, settings['dhtport'], NODE_ID)
 
 	if settings['listen']:
 		p2pserver = NodeServer(settings['listen_host'],

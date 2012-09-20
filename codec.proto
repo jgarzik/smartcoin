@@ -23,8 +23,32 @@ message MsgAddresses {
 	repeated Address peers = 1;
 }
 
-message MsgDHTStore {
-	required bytes key = 1;
-	required bytes value = 2;
+message MsgDHTMisc {
+	required uint64 request_id = 1;
+}
+
+message MsgDHTKey {
+	required uint64 request_id = 1;
+	required bytes key = 2;
 	optional uint64 flags = 3 [default = 0];
 }
+
+message MsgDHTKeyValue {
+	required uint64 request_id = 1;
+	required bytes key = 2;
+	required bytes value = 3;
+	optional uint64 flags = 4 [default = 0];
+}
+
+message MsgDHTNode {
+	required uint64 node_id = 1;
+	required string ip = 2;
+	required uint32 port = 3;
+	optional uint64 flags = 4 [default = 0];
+}
+
+message MsgDHTNodes {
+	required uint64 request_id = 1;
+	repeated MsgDHTNode nodes = 2;
+}
+
