@@ -19,6 +19,7 @@ import Log
 import codec_pb2
 import rpc
 import httpsrv
+import dht
 from coredefs import PROTO_VERSION
 
 MIN_PROTO_VERSION = 10000
@@ -357,6 +358,8 @@ if __name__ == '__main__':
 	chain = settings['chain']
 	if 'log' not in settings or (settings['log'] == '-'):
 		settings['log'] = None
+	if 'dhtport' not in settings:
+		settings['dhtport'] = 9530
 
 	if 'port' in settings:
 		settings['port'] = int(settings['port'])
@@ -373,6 +376,7 @@ if __name__ == '__main__':
 	if 'port' in settings:
 		settings['port'] = int(settings['port'])
 	settings['rpcport'] = int(settings['rpcport'])
+	settings['dhtport'] = int(settings['dhtport'])
 
 	log = Log.Log(settings['log'])
 
@@ -384,6 +388,8 @@ if __name__ == '__main__':
 	s = httpsrv.Server('', settings['rpcport'], rpc.RPCRequestHandler,
 			  (log, peermgr,
 			   settings['rpcuser'], settings['rpcpass']))
+
+	dht = dht.DHTServer(log, settings['dhtport'])
 
 	if settings['listen']:
 		p2pserver = NodeServer(settings['listen_host'],
