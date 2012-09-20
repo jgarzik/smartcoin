@@ -97,46 +97,44 @@ class DHTServer(asyncore.dispatcher):
 		return False
 
 	def got_packet(self, recvbuf, addr):
-		while True:
-			if len(recvbuf) < 4:
-				return
-			if recvbuf[:4] != 'DHT1':
-				raise ValueError("got garbage %s" % repr(recvbuf))
-			# check checksum
-			if len(recvbuf) < 4 + 12 + 4 + 4:
-				return
-			command = recvbuf[4:4+12].split("\x00", 1)[0]
-			msglen = struct.unpack("<I", recvbuf[4+12:4+12+4])[0]
-			if msglen > (16 * 1024 * 1024):
-				raise ValueError("msglen %u too big" % (msglen,))
+		if len(recvbuf) < 4 + 12 + 4 + 4:
+			return
+		if recvbuf[:4] != 'DHT1':
+			raise ValueError("got garbage %s" % repr(recvbuf))
 
-			checksum = recvbuf[4+12+4:4+12+4+4]
-			if len(recvbuf) < 4 + 12 + 4 + 4 + msglen:
-				return
-			msg = recvbuf[4+12+4+4:4+12+4+4+msglen]
-			th = hashlib.sha256(msg).digest()
-			h = hashlib.sha256(th).digest()
-			if checksum != h[:4]:
-				raise ValueError("got bad checksum %s" % repr(recvbuf))
-			recvbuf = recvbuf[4+12+4+4+msglen:]
+		# check checksum
+		command = recvbuf[4:4+12].split("\x00", 1)[0]
+		msglen = struct.unpack("<I", recvbuf[4+12:4+12+4])[0]
+		if msglen > (16 * 1024 * 1024):
+			raise ValueError("msglen %u too big" % (msglen,))
 
-			if command in self.messagemap:
-				if command == "store":
-					t = codec_pb2.MsgDHTKeyValue()
-				elif (command == "find-nodes" or
-				      command == "find-value"):
-					t = codec_pb2.MsgDHTKey()
-				else:
-					t = codec_pb2.MsgDHTMisc()
+		checksum = recvbuf[4+12+4:4+12+4+4]
+		if len(recvbuf) < 4 + 12 + 4 + 4 + msglen:
+			return
+		msg = recvbuf[4+12+4+4:4+12+4+4+msglen]
+		th = hashlib.sha256(msg).digest()
+		h = hashlib.sha256(th).digest()
+		if checksum != h[:4]:
+			raise ValueError("got bad checksum %s" % repr(recvbuf))
+		recvbuf = recvbuf[4+12+4+4+msglen:]
 
-				try:
-					t.ParseFromString(msg)
-				except google.protobuf.message.DecodeError:
-					raise ValueError("bad decode %s" % repr(recvbuf))
-
-				self.got_message(command, t, addr)
+		if command in self.messagemap:
+			if command == "store":
+				t = codec_pb2.MsgDHTKeyValue()
+			elif (command == "find-nodes" or
+			      command == "find-value"):
+				t = codec_pb2.MsgDHTKey()
 			else:
-				self.log.write("UNKNOWN COMMAND %s %s" % (command, repr(msg)))
+				t = codec_pb2.MsgDHTMisc()
+
+			try:
+				t.ParseFromString(msg)
+			except google.protobuf.message.DecodeError:
+				raise ValueError("bad decode %s" % repr(recvbuf))
+
+			self.got_message(command, t, addr)
+		else:
+			self.log.write("UNKNOWN COMMAND %s %s" % (command, repr(msg)))
 
 	def send_message(self, command, message, addr):
 		if verbose_sendmsg(command):
