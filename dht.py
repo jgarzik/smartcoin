@@ -41,7 +41,7 @@ class NodeDist(object):
 		self.node_id = node_id
 		self.distance = distance
 
-class DHTServer(asyncore.dispatcher):
+class DHT(asyncore.dispatcher):
 	messagemap = {
 		"ping",
 		"store",
