@@ -23,3 +23,8 @@ message MsgAddresses {
 	repeated Address peers = 1;
 }
 
+message MsgDHTStore {
+	required bytes key = 1;
+	required bytes value = 2;
+	optional uint64 flags = 3 [default = 0];
+}

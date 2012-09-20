@@ -9,6 +9,7 @@
 import socket
 import asyncore
 import codec_pb2
+import LRU
 
 debugdht = True
 
@@ -17,9 +18,15 @@ def verbose_sendmsg(command):
 		return True
 	return True
 
+def valid_key_len(n):
+	if n == 20 or n == 32 or n == 64:
+		return True
+	return False
+
 class DHTServer(asyncore.dispatcher):
 	messagemap = {
 		"ping",
+		"store",
 	}
 
 	def __init__(self, log, bindport):
@@ -27,9 +34,11 @@ class DHTServer(asyncore.dispatcher):
 		self.log = log
 		self.bindport = bindport
 		self.create_socket(socket.AF_INET, socket.SOCK_DGRAM)
-		self.bind(('', bindport)) 
+		self.bind(('', bindport))
 		self.state = 'open'
 		self.last_sent = 0
+
+		self.dht_cache = LRU.LRU(100000)
 
 	def handle_connect(self):
 		pass
@@ -48,7 +57,7 @@ class DHTServer(asyncore.dispatcher):
 
 	def handle_read(self):
 		try:
-			data, addr = self.recvfrom(2048) 
+			data, addr = self.recvfrom(2048)
 		except:
 			self.handle_close()
 			return
@@ -92,6 +101,8 @@ class DHTServer(asyncore.dispatcher):
 			if command in self.messagemap:
 				if command == "ping":
 					t = codec_pb2.MsgPingPong()
+				elif command == "store":
+					t = codec_pb2.MsgDHTStore()
 
 				try:
 					t.ParseFromString(msg)
@@ -129,4 +140,14 @@ class DHTServer(asyncore.dispatcher):
 			msgout = codec_pb2.MsgPingPong()
 			msgout.cookie = message.cookie
 			self.send_message("pong", msgout, addr)
+
+		elif command == "store":
+			self.op_store(message)
+
+	def op_store(self, message):
+		if (not valid_key_len(len(message.key)) or
+		    len(message.value) > 4096):
+			return
+
+		self.dht_cache[message.key] = message.value
 
