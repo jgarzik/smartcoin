@@ -17,6 +17,7 @@ import socket
 import asyncore
 import codec_pb2
 import LRU
+import hashlib
 
 debugdht = True
 
@@ -29,6 +30,14 @@ def valid_key_len(n):
 	if n == 20 or n == 32 or n == 64:
 		return True
 	return False
+
+def bn2bin(v):
+	s = bytearray()
+	i = bn_bytes(v)
+	while i > 0:
+		s.append((v >> ((i-1) * 8)) & 0xff)
+		i -= 1
+	return s
 
 def bin2bn(s):
 	l = 0L
@@ -43,10 +52,13 @@ class NodeDist(object):
 
 class DHT(asyncore.dispatcher):
 	messagemap = {
-		"ping",
-		"store",
+		"err",
 		"find-nodes",
 		"find-value",
+		"nodes",
+		"ping",
+		"pong",
+		"store",
 	}
 
 	def __init__(self, log, bindport, node_id):
@@ -121,6 +133,10 @@ class DHT(asyncore.dispatcher):
 		if command in self.messagemap:
 			if command == "store":
 				t = codec_pb2.MsgDHTKeyValue()
+			elif command == "nodes":
+				t = codec_pb2.MsgDHTNodes()
+			elif command == "pong":
+				t = codec_pb2.MsgDHTPong()
 			elif (command == "find-nodes" or
 			      command == "find-value"):
 				t = codec_pb2.MsgDHTKey()
@@ -160,18 +176,29 @@ class DHT(asyncore.dispatcher):
 			self.log.write("RECV %s %s" % (command, str(message)))
 
 		if command == "ping":
-			msgout = codec_pb2.MsgDHTMisc()
+			msgout = codec_pb2.MsgDHTPong()
 			msgout.request_id = message.request_id
+			msgout.node_id = self.node_id
 			self.send_message("pong", msgout, addr)
+
+		elif command == "pong":
+			self.op_pong(message, addr)
 
 		elif command == "store":
 			self.op_store(message, addr)
+
+		elif command == "nodes":
+			self.op_nodes(message, addr)
 
 		elif command == "find-nodes":
 			self.op_find_nodes(message, addr)
 
 		elif command == "find-value":
 			self.op_find_value(message, addr)
+
+	def op_pong(self, message, addr):
+		# TODO
+		pass
 
 	def op_store(self, message, addr):
 		res = "err"
@@ -184,12 +211,15 @@ class DHT(asyncore.dispatcher):
 		msgout.request_id = message.request_id
 		self.send_message(res, msgout, addr)
 
-	def find_nodes(self, key):
+	def find_nodes(self, key, want_nid0):
 		key_num = bin2bn(key)
 
 		# obtain a distance value for each node, by xor'ing with key
 		dists = []
 		for node in self.dht_nodes.itervalues():
+			if node.node_id == 0 and not want_nid0:
+				continue
+
 			nd = NodeDist(node.node_id, node.node_id ^ key_num)
 			dists.append(nd)
 
@@ -202,8 +232,13 @@ class DHT(asyncore.dispatcher):
 		for nd in dists:
 			node = self.dht_nodes[nd.node_id]
 			ret.append(node)
-			
+
 		return ret
+
+	def op_nodes(self, message, addr):
+		for node in message.nodes:
+			if node.node_id not in self.dht_nodes:
+				self.dht_nodes[node.node_id] = node
 
 	def op_find_nodes(self, message, addr):
 		if not valid_key_len(len(message.key)):
@@ -215,7 +250,7 @@ class DHT(asyncore.dispatcher):
 		msgout = codec_pb2.MsgDHTNodes()
 		msgout.request_id = message.request_id
 
-		nodes = self.find_nodes(message.key)
+		nodes = self.find_nodes(message.key, False)
 		for node in nodes:
 			node_out = msgout.nodes.add()
 			node_out.node_id = node.node_id
@@ -225,7 +260,7 @@ class DHT(asyncore.dispatcher):
 				node_out.flags = node.flags
 
 		self.send_message("nodes", msgout, addr)
-	
+
 	def op_find_value(self, message, addr):
 		if message.key in self.dht_cache:
 			msgout = codec_pb2.MsgDHTKeyValue()
@@ -236,4 +271,28 @@ class DHT(asyncore.dispatcher):
 			return
 
 		self.op_find_nodes(message, addr)
+
+	def bootstrap(self):
+		# search key == sha256(node id)
+		node_id_bin = bn2bin(self.node_id)
+		hash = hashlib.sha256(node_id_bin).digest()
+
+		# send message to nearest nodes (possibly only a handful
+		# of DNS bootstrap nodes)
+		nodes = self.find_nodes(hash, True)
+		for node in nodes:
+			# do not send to ourselves
+			if node.node_id == self.node_id:
+				continue
+
+			msgout = codec_pb2.MsgDHTMisc()
+			msgout.request_id = 1
+			self.send_message("ping", msgout,
+					  (node.ip, node.port))
+
+			msgout = codec_pb2.MsgDHTKey()
+			msgout.request_id = 2
+			msgout.key = hash
+			self.send_message("find-nodes", msgout,
+					  (node.ip, node.port))
 
