@@ -150,9 +150,9 @@ class DHTBucket(object):
 		return new_node
 
 	def refill(self):
-		while not bucket.full() and len(self.candidates) > 0:
-			new_node = bucket.newest_candidate()
-			self.promote_node(bucket, new_node)
+		while not self.full() and len(self.candidates) > 0:
+			new_node = self.newest_candidate()
+			self.promote_node(new_node)
 
 	def demote_node(self, node):
 		if (not node.active or
