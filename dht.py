@@ -76,6 +76,64 @@ class DHTBucket(object):
 		self.active = []
 		self.candidates = []
 
+class DHTRouter(object):
+	def __init__(self):
+		self.dht_nodes = {}		# key: node_id
+		self.all_nodes = {}		# key: (ip,port) tuple
+
+		self.buckets = []
+		for i in xrange(64):
+			bucket = DHTBucket()
+			self.buckets.append(bucket)
+
+	def find_nodes(self, key):
+		key_num = bin2bn(key)
+
+		# obtain a distance value for each node, by xor'ing with key
+		dists = []
+		for node in self.dht_nodes.itervalues():
+			nd = NodeDist(node.node_id, node.node_id ^ key_num)
+			dists.append(nd)
+
+		# sort by distance value; limit number of returned nodes
+		dists = sorted(dists, key=lambda snd: snd.distance)
+		dists = dists[:20]
+
+		# build return set of node records
+		ret = []
+		for nd in dists:
+			node = self.dht_nodes[nd.node_id]
+			ret.append(node)
+
+		return ret
+
+	def add_node(self, node_msgobj):
+		node = DHTNode(node_msgobj.node_id,
+			       node_msgobj.ip,
+			       node_msgobj.port,
+			       node_msgobj.flags)
+
+		# pick bucket based on number of matching bits
+		# in node idx
+		node.bucket_idx = matching_bits(self.node_id,
+						node_msgobj.node_id)
+
+		# store in ip-indexed master list
+		self.all_nodes[(node.ip, node.port)] = node
+
+		# store in bucket, based on prefix length
+		bucket = self.buckets[node.bucket_idx]
+
+		# if we are actively trying to fill a bucket,
+		# go ahead and put in an unconfirmed peer
+		if len(bucket.active) < bucket.active_max:
+			bucket.active.append(node)
+			self.dht_nodes[node.node_id] = node
+
+		# otherwise, add it to the candidates list
+		else:
+			bucket.candidates.append(node)
+
 class DHT(asyncore.dispatcher):
 	messagemap = {
 		"err",
@@ -98,13 +156,7 @@ class DHT(asyncore.dispatcher):
 		self.last_sent = 0
 
 		self.dht_cache = LRU.LRU(100000)
-		self.dht_nodes = {}		# key: node_id
-		self.all_nodes = {}		# key: (ip,port) tuple
-
-		self.buckets = []
-		for i in xrange(64):
-			bucket = DHTBucket()
-			self.buckets.append(bucket)
+		self.dht_router = DHTRouter()
 
 	def handle_connect(self):
 		pass
@@ -243,58 +295,10 @@ class DHT(asyncore.dispatcher):
 		msgout.request_id = message.request_id
 		self.send_message(res, msgout, addr)
 
-	def find_nodes(self, key):
-		key_num = bin2bn(key)
-
-		# obtain a distance value for each node, by xor'ing with key
-		dists = []
-		for node in self.dht_nodes.itervalues():
-			nd = NodeDist(node.node_id, node.node_id ^ key_num)
-			dists.append(nd)
-
-		# sort by distance value; limit number of returned nodes
-		dists = sorted(dists, key=lambda snd: snd.distance)
-		dists = dists[:20]
-
-		# build return set of node records
-		ret = []
-		for nd in dists:
-			node = self.dht_nodes[nd.node_id]
-			ret.append(node)
-
-		return ret
-
-	def add_node(self, node_msgobj):
-		node = DHTNode(node_msgobj.node_id,
-			       node_msgobj.ip,
-			       node_msgobj.port,
-			       node_msgobj.flags)
-
-		# pick bucket based on number of matching bits
-		# in node idx
-		node.bucket_idx = matching_bits(self.node_id,
-						node_msgobj.node_id)
-
-		# store in ip-indexed master list
-		self.all_nodes[(node.ip, node.port)] = node
-
-		# store in bucket, based on prefix length
-		bucket = self.buckets[node.bucket_idx]
-
-		# if we are actively trying to fill a bucket,
-		# go ahead and put in an unconfirmed peer
-		if len(bucket.active) < bucket.active_max:
-			bucket.active.append(node)
-			self.dht_nodes[node.node_id] = node
-
-		# otherwise, add it to the candidates list
-		else:
-			bucket.candidates.append(node)
-
 	def op_nodes(self, message, addr):
 		for node in message.nodes:
 			if node.node_id not in self.dht_nodes:
-				self.add_node(node)
+				self.dht_router.add_node(node)
 
 	def op_find_nodes(self, message, addr):
 		if not valid_key_len(len(message.key)):
@@ -306,7 +310,7 @@ class DHT(asyncore.dispatcher):
 		msgout = codec_pb2.MsgDHTNodes()
 		msgout.request_id = message.request_id
 
-		nodes = self.find_nodes(message.key)
+		nodes = self.dht_router.find_nodes(message.key)
 		for node in nodes:
 			node_out = msgout.nodes.add()
 			node_out.node_id = node.node_id
