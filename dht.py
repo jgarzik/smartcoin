@@ -74,7 +74,7 @@ class DHTTask(object):
 class DHTTaskManager(object):
 	def __init__(self):
 		self.tasks = {}
-	
+
 	def new_task_id(self):
 		while True:
 			rand_id = random.getrandbits(64)
@@ -116,42 +116,20 @@ class DHTBucket(object):
 		self.active_max = 20
 		self.active = {}
 		self.candidates = []
-		self.demoted_ = []
-
-	def demoted(self):
-		l = self.demoted_
-		self.demoted_ = []
-		return l
 
 	def promote_node(self, node):
 		if (node.active or
 		    node.node_id == 0):
 			return False
 
-		bucket_full = (len(self.active) >= self.active_max)
-
-		# sort active list by last-seen time
-		if bucket_full:
-			s_act = sorted(self.active.values(),
-				       lambda actnode: actnode.last_seen)
-
-			# ignore, if node is older than oldest last-seen time
-			if node.last_seen <= s_act[0].last_seen:
-				return False
+		# cannot promote, if bucket full
+		if len(self.active) >= self.active_max:
+			return False
 
 		# promote node to active: candidate -> active transition
 		self.candidates.remove(node)
 		self.active[node.node_id] = node
 		node.active = True
-
-		# shrink active list, demote older node
-		if bucket_full:
-			old_node = s_act[0]
-			old_node.active = False
-
-			del self.active[old_node.node_id]
-			self.candidates.append(old_node)
-			self.demoted_.append(old_node)
 
 		return True
 
@@ -226,11 +204,6 @@ class DHTRouter(object):
 
 		# promoted to dht_nodes
 		self.dht_nodes[node.node_id] = node
-
-		# demoted, remove from dht_nodes
-		demoted = bucket.demoted()
-		for old_node in demoted:
-			del self.dht_nodes[old_node.node_id]
 
 		return True
 
