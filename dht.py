@@ -107,6 +107,7 @@ class DHTNode(object):
 
 		self.first_seen = datetime.datetime.utcnow()
 		self.last_seen = datetime.datetime(1980, 1, 1)
+		self.rtt = None
 		self.bucket_idx = -1
 		self.active = False
 
@@ -233,7 +234,7 @@ class DHTRouter(object):
 
 		return True
 
-	def touch_node(self, addr, node_id, flags):
+	def touch_node(self, addr, node_id, flags, rtt):
 		try:
 			node = self.all_nodes[addr]
 		except KeyError:
@@ -242,6 +243,7 @@ class DHTRouter(object):
 		node.node_id = node_id
 		node.flags = flags
 		node.last_seen = datetime.datetime.utcnow()
+		node.rtt = rtt
 
 		# make node active, if possible
 		bucket = self.buckets[node.bucket_idx]
@@ -403,8 +405,10 @@ class DHT(asyncore.dispatcher):
 		if task is None:
 			return
 
+		rtt = msg_end - task.time_start
+
 		self.dht_router.touch_node(addr, message.node_id,
-					   message.flags)
+					   message.flags, rtt)
 
 	def op_store(self, message, addr):
 		res = "err"
