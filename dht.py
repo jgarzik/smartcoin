@@ -14,10 +14,12 @@
 #
 
 import socket
+import datetime
 import asyncore
+import hashlib
+
 import codec_pb2
 import LRU
-import hashlib
 
 debugdht = True
 
@@ -67,6 +69,8 @@ class DHTNode(object):
 		self.ip = ip
 		self.port = port
 		self.flags = flags
+
+		self.first_seen = datetime.datetime.utcnow()
 		self.last_seen = None
 		self.bucket_idx = -1
 
@@ -108,6 +112,12 @@ class DHTRouter(object):
 		return ret
 
 	def add_node(self, node_msgobj):
+		if ((len(node_msgobj.ip) != 4 and
+		     len(node_msgobj.ip) != 16) or
+		    node_msgobj.port < 1 or
+		    node_msgobj.port > 65535):
+			return
+
 		node = DHTNode(node_msgobj.node_id,
 			       node_msgobj.ip,
 			       node_msgobj.port,
@@ -118,15 +128,22 @@ class DHTRouter(object):
 		node.bucket_idx = matching_bits(self.node_id,
 						node_msgobj.node_id)
 
+		addr_tup = (node.ip, node.port)
+
+		if (addr_tup in self.all_nodes or
+		    node.node_id in self.dht_nodes):
+			return
+
 		# store in ip-indexed master list
-		self.all_nodes[(node.ip, node.port)] = node
+		self.all_nodes[addr_tup] = node
 
 		# store in bucket, based on prefix length
 		bucket = self.buckets[node.bucket_idx]
 
 		# if we are actively trying to fill a bucket,
 		# go ahead and put in an unconfirmed peer
-		if len(bucket.active) < bucket.active_max:
+		if (len(bucket.active) < bucket.active_max and
+		    node.node_id != 0):
 			bucket.active.append(node)
 			self.dht_nodes[node.node_id] = node
 
@@ -297,8 +314,7 @@ class DHT(asyncore.dispatcher):
 
 	def op_nodes(self, message, addr):
 		for node in message.nodes:
-			if node.node_id not in self.dht_nodes:
-				self.dht_router.add_node(node)
+			self.dht_router.add_node(node)
 
 	def op_find_nodes(self, message, addr):
 		if not valid_key_len(len(message.key)):
