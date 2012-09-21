@@ -17,6 +17,7 @@ import socket
 import datetime
 import asyncore
 import hashlib
+import random
 
 import codec_pb2
 import LRU
@@ -63,6 +64,40 @@ class NodeDist(object):
 		self.node_id = node_id
 		self.distance = distance
 
+class DHTTask(object):
+	def __init__(self):
+		self.addr = None
+		self.msg_start = None
+		self.time_start = datetime.datetime.utcnow()
+		self.task_id = None
+
+class DHTTaskManager(object):
+	def __init__(self):
+		self.tasks = {}
+	
+	def new_task_id(self):
+		while True:
+			rand_id = random.getrandbits(64)
+			if rand_id not in self.tasks:
+				return rand_id
+
+	def new_task(self):
+		task = DHTTask()
+		task.task_id = self.new_task_id()
+
+		self.tasks[task.task_id] = task
+
+		return task
+
+	def delete(self, task_id):
+		if task_id not in self.tasks:
+			return
+
+		task = self.tasks[task_id]
+		del self.tasks[task_id]
+
+		return task
+
 class DHTNode(object):
 	def __init__(self, node_id=0L, ip=None, port=0, flags=0):
 		self.node_id = node_id
@@ -71,14 +106,53 @@ class DHTNode(object):
 		self.flags = flags
 
 		self.first_seen = datetime.datetime.utcnow()
-		self.last_seen = None
+		self.last_seen = datetime.datetime(1980, 1, 1)
 		self.bucket_idx = -1
+		self.active = False
 
 class DHTBucket(object):
 	def __init__(self):
 		self.active_max = 20
-		self.active = []
+		self.active = {}
 		self.candidates = []
+		self.demoted_ = []
+
+	def demoted(self):
+		l = self.demoted_
+		self.demoted_ = []
+		return l
+
+	def promote_node(self, node):
+		if (node.active or
+		    node.node_id == 0):
+			return False
+
+		bucket_full = (len(self.active) >= self.active_max)
+
+		# sort active list by last-seen time
+		if bucket_full:
+			s_act = sorted(self.active.values(),
+				       lambda actnode: actnode.last_seen)
+
+			# ignore, if node is older than oldest last-seen time
+			if node.last_seen <= s_act[0].last_seen:
+				return False
+
+		# promote node to active: candidate -> active transition
+		self.candidates.remove(node)
+		self.active[node.node_id] = node
+		node.active = True
+
+		# shrink active list, demote older node
+		if bucket_full:
+			old_node = s_act[0]
+			old_node.active = False
+
+			del self.active[old_node.node_id]
+			self.candidates.append(old_node)
+			self.demoted_.append(old_node)
+
+		return True
 
 class DHTRouter(object):
 	def __init__(self):
@@ -139,17 +213,41 @@ class DHTRouter(object):
 
 		# store in bucket, based on prefix length
 		bucket = self.buckets[node.bucket_idx]
+		bucket.candidates.append(node)
 
-		# if we are actively trying to fill a bucket,
-		# go ahead and put in an unconfirmed peer
-		if (len(bucket.active) < bucket.active_max and
-		    node.node_id != 0):
-			bucket.active.append(node)
-			self.dht_nodes[node.node_id] = node
+		# make node active, if possible
+		self.promote_node(bucket, node)
 
-		# otherwise, add it to the candidates list
-		else:
-			bucket.candidates.append(node)
+	def promote_node(self, bucket, node):
+		# attempt to make active, within bucket
+		if not bucket.promote_node(node):
+			return False
+
+		# promoted to dht_nodes
+		self.dht_nodes[node.node_id] = node
+
+		# demoted, remove from dht_nodes
+		demoted = bucket.demoted()
+		for old_node in demoted:
+			del self.dht_nodes[old_node.node_id]
+
+		return True
+
+	def touch_node(self, addr, node_id, flags):
+		try:
+			node = self.all_nodes[addr]
+		except KeyError:
+			return False
+
+		node.node_id = node_id
+		node.flags = flags
+		node.last_seen = datetime.datetime.utcnow()
+
+		# make node active, if possible
+		bucket = self.buckets[node.bucket_idx]
+		self.promote_node(bucket, node)
+
+		return True
 
 class DHT(asyncore.dispatcher):
 	messagemap = {
@@ -174,6 +272,7 @@ class DHT(asyncore.dispatcher):
 
 		self.dht_cache = LRU.LRU(100000)
 		self.dht_router = DHTRouter()
+		self.taskman = DHTTaskManager()
 
 	def handle_connect(self):
 		pass
@@ -298,8 +397,14 @@ class DHT(asyncore.dispatcher):
 			self.op_find_value(message, addr)
 
 	def op_pong(self, message, addr):
-		# TODO
-		pass
+		msg_end = datetime.datetime.utcnow()
+
+		task = self.taskman.delete(message.request_id)
+		if task is None:
+			return
+
+		self.dht_router.touch_node(addr, message.node_id,
+					   message.flags)
 
 	def op_store(self, message, addr):
 		res = "err"
@@ -356,8 +461,15 @@ class DHT(asyncore.dispatcher):
 			if node.node_id == self.node_id:
 				continue
 
+			task = self.taskman.new_task()
+
 			msgout = codec_pb2.MsgDHTMisc()
-			msgout.request_id = 1
-			self.send_message("ping", msgout,
-					  (node.ip, node.port))
+			msgout.request_id = task.task_id
+
+			addr_tup = (node.ip, node.port)
+
+			task.addr = addr_tup
+			task.msg_start = msgout
+
+			self.send_message("ping", msgout, addr_tup)
 
