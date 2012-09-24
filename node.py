@@ -6,7 +6,12 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #
 
-import asyncore
+import gevent
+import gevent.pywsgi
+from gevent import Greenlet
+from gevent import monkey; monkey.patch_all()
+
+import signal
 import hashlib
 import sys
 import re
@@ -14,11 +19,10 @@ import socket
 import time
 import struct
 import random
+import rpc
 
 import Log
 import codec_pb2
-import rpc
-import httpsrv
 import dht
 from coredefs import PROTO_VERSION
 
@@ -53,7 +57,7 @@ class MsgNull(object):
 	def __str__(self):
 		return "MsgNull()"
 
-class NodeConn(asyncore.dispatcher):
+class NodeConn(Greenlet):
 	messagemap = {
 		"version",
 		"verack",
@@ -64,38 +68,36 @@ class NodeConn(asyncore.dispatcher):
 	}
 
 	def __init__(self, log, peermgr, sock=None, dstaddr=None, dstport=None):
-		asyncore.dispatcher.__init__(self, sock=sock)
+		Greenlet.__init__(self)
 		self.log = log
 		self.peermgr = peermgr
 		self.dstaddr = dstaddr
 		self.dstport = dstport
-		if sock is None:
-			self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-			self.state = "connecting"
-			self.outbound = True
-		else:
-			self.outbound = False
-			if self.dstaddr is None:
-				self.dstaddr = '0.0.0.0'
-			if self.dstport is None:
-				self.dstport = 0
-			self.state = "connected"
-			self.log.write(self.dstaddr + " connected")
-		self.sendbuf = ""
 		self.recvbuf = ""
 		self.ver_send = MIN_PROTO_VERSION
 		self.last_sent = 0
 
 		if sock is None:
-			#stuff version msg into sendbuf
-			vt = self.version_msg()
-			self.send_message("version", vt, True)
-
 			self.log.write("connecting to " + self.dstaddr)
+			self.outbound = True
 			try:
-				self.connect((dstaddr, dstport))
+				self.sock = gevent.socket.socket(socket.AF_INET,
+							     socket.SOCK_STREAM)
+				self.sock.connect((dstaddr, dstport))
 			except:
 				self.handle_close()
+
+			# immediately send message
+			vt = self.version_msg()
+			self.send_message("version", vt)
+		else:
+			self.sock = sock
+			self.outbound = False
+			if self.dstaddr is None:
+				self.dstaddr = '0.0.0.0'
+			if self.dstport is None:
+				self.dstport = 0
+			self.log.write(self.dstaddr + " connected")
 
 	def version_msg(self):
 		vt = codec_pb2.MsgVersion()
@@ -106,44 +108,27 @@ class NodeConn(asyncore.dispatcher):
 
 	def handle_connect(self):
 		self.log.write(self.dstaddr + " connected")
-		self.state = "connected"
+
+	def _run(self):
+		self.log.write(self.dstaddr + " connected")
+		while True:
+			try:
+				t = self.sock.recv(8192)
+				if len(t) <= 0: raise ValueError
+			except (IOError, ValueError):
+				self.handle_close()
+				return
+			self.recvbuf += t
+			self.got_data()
 
 	def handle_close(self):
 		self.log.write(self.dstaddr + " close")
-		self.state = "closed"
 		self.recvbuf = ""
-		self.sendbuf = ""
 		try:
-			self.shutdown(socket.SHUT_RDWR)
-			self.close()
+			self.sock.shutdown(socket.SHUT_RDWR)
+			self.sock.close()
 		except:
 			pass
-
-	def handle_read(self):
-		try:
-			t = self.recv(8192)
-		except:
-			self.handle_close()
-			return
-		if len(t) == 0:
-			self.handle_close()
-			return
-		self.recvbuf += t
-		self.got_data()
-
-	def readable(self):
-		return True
-
-	def writable(self):
-		return (len(self.sendbuf) > 0)
-
-	def handle_write(self):
-		try:
-			sent = self.send(self.sendbuf)
-		except:
-			self.handle_close()
-			return
-		self.sendbuf = self.sendbuf[sent:]
 
 	def got_data(self):
 		while True:
@@ -192,11 +177,7 @@ class NodeConn(asyncore.dispatcher):
 			else:
 				self.log.write("UNKNOWN COMMAND %s %s" % (command, repr(msg)))
 
-	def send_message(self, command, message, pushbuf=False):
-		if self.state != "connected" and not pushbuf:
-			self.log.write("WARNING: sending without connection")
-			return
-
+	def send_message(self, command, message):
 		if verbose_sendmsg(command):
 			self.log.write("SEND %s %s" % (command, str(message)))
 
@@ -212,7 +193,7 @@ class NodeConn(asyncore.dispatcher):
 		tmsg += h[:4]
 
 		tmsg += data
-		self.sendbuf += tmsg
+		self.sock.sendall(tmsg)
 		self.last_sent = time.time()
 
 	def got_message(self, command, message):
@@ -264,25 +245,31 @@ class NodeConn(asyncore.dispatcher):
 
 			self.send_message("addr", msgout)
 
-class NodeServer(asyncore.dispatcher):
+class NodeServer(Greenlet):
 	def __init__(self, host, port, log, peermgr):
-		asyncore.dispatcher.__init__(self)
+		Greenlet.__init__(self)
 		self.log = log
-		self.peermgr = peermgr
-		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.set_reuse_addr()
-		self.bind((host, port))
-		self.listen(25)
+		self.peermgr = peermgr		
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		self.sock.bind((host, port))
+		self.sock.listen(25)
+
+	def _run(self):
+		while True:
+			self.handle_accept()
 
 	def handle_accept(self):
-		pair = self.accept()
+		pair = self.sock.accept()
 		if pair is None:
 			pass
 		else:
 			sock, addr = pair
 			self.log.write('Incoming connection from %s' % repr(addr))
 			handler = NodeConn(self.log, self.peermgr, sock=sock,
-					   dstaddr=addr[0], dstport=addr[1])
+							   dstaddr=addr[0], dstport=addr[1])
+			handler.start()
+
 
 class PeerManager(object):
 	def __init__(self, log):
@@ -293,10 +280,11 @@ class PeerManager(object):
 
 	def add(self, host, port):
 		self.log.write("PeerManager: connecting to %s:%d" %
-			       (host, port))
+				   (host, port))
 		self.tried[host] = True
 		c = NodeConn(self.log, self, dstaddr=host, dstport=port)
 		self.peers.append(c)
+		return c
 
 	def new_addrs(self, addrs):
 		for addr in addrs:
@@ -384,22 +372,36 @@ if __name__ == '__main__':
 
 	peermgr = PeerManager(log)
 
-	# start HTTP server for JSON-RPC
-	s = httpsrv.Server('', settings['rpcport'], rpc.RPCRequestHandler,
-			  (log, peermgr,
-			   settings['rpcuser'], settings['rpcpass']))
+	threads = []
 
-	dht = dht.DHT(log, settings['dhtport'], NODE_ID)
+	# start HTTP server for JSON-RPC
+	rpcexec = rpc.RPCExec(peermgr, log,
+			      settings['rpcuser'], settings['rpcpass'])
+	rpcserver = gevent.pywsgi.WSGIServer(('', settings['rpcport']),
+						rpcexec.handle_request)
+	t = gevent.Greenlet(rpcserver.serve_forever)
+	t.start()
+	threads.append(t)
+
+	#dht = dht.DHT(log, settings['dhtport'], NODE_ID)
 
 	if settings['listen']:
 		p2pserver = NodeServer(settings['listen_host'],
 				       settings['listen_port'],
 				       log, peermgr)
 
+		p2pserver.start()
+		threads.append(p2pserver)
+
 	# connect to specified remote node
 	if addnode:
-		peermgr.add(settings['host'], settings['port'])
+		c = peermgr.add(settings['host'], settings['port'])
+		c.start()
+		threads.append(c)
 
 	# program main loop
-	asyncore.loop()
+	def shutdown():
+		for t in threads: t.kill()
+	gevent.signal(signal.SIGINT, shutdown)
+	gevent.joinall(threads)
 
