@@ -383,7 +383,9 @@ if __name__ == '__main__':
 	t.start()
 	threads.append(t)
 
-	#dht = dht.DHT(log, settings['dhtport'], NODE_ID)
+	dht = dht.DHT(log, settings['dhtport'], NODE_ID)
+	dht.start()
+	threads.append(dht)
 
 	if settings['listen']:
 		p2pserver = NodeServer(settings['listen_host'],

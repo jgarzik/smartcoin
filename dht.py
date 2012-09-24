@@ -13,6 +13,10 @@
 #	find-value -> nodes, data, err
 #
 
+import gevent
+from gevent import Greenlet
+from gevent import monkey; monkey.patch_all()
+
 import socket
 import datetime
 import asyncore
@@ -304,7 +308,7 @@ def ping_node_timeout(task):
 	bucket = self.buckets[node.bucket_idx]
 	dht.dht_router.demote_node(bucket, node)
 
-class DHT(asyncore.dispatcher):
+class DHT(Greenlet):
 	messagemap = {
 		"err",
 		"find-nodes",
@@ -316,52 +320,41 @@ class DHT(asyncore.dispatcher):
 	}
 
 	def __init__(self, log, bindport, node_id):
-		asyncore.dispatcher.__init__(self)
+		Greenlet.__init__(self)
 		self.log = log
+		self.dstaddr = '0.0.0.0'
 		self.bindport = bindport
 		self.node_id = node_id
-		self.create_socket(socket.AF_INET, socket.SOCK_DGRAM)
-		self.bind(('', bindport))
-		self.state = 'open'
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		self.sock.bind(('', bindport))
 		self.last_sent = 0
 
 		self.dht_cache = LRU.LRU(100000)
 		self.dht_router = DHTRouter(self)
 		self.taskman = DHTTaskManager()
 
-	def handle_connect(self):
-		pass
+		self.log.write(self.dstaddr + ':' + str(self.bindport) +
+			       " open DHT")
 
-	def handle_write(self):
-		pass
+	def _run(self):
+		while True:
+			try:
+				msg, address = self.sock.recvfrom(16384)
+				self.got_packet(msg, address)
+			except socket.error, err:
+				if err[0]==errno.EAGAIN:
+					return
+				self.handle_close()
+				return
 
 	def handle_close(self):
 		self.log.write(self.dstaddr + " close")
-		self.state = "closed"
 		try:
-			self.shutdown(socket.SHUT_RDWR)
-			self.close()
+			self.sock.shutdown(socket.SHUT_RDWR)
+			self.sock.close()
 		except:
 			pass
-
-	def handle_read(self):
-		try:
-			data, addr = self.recvfrom(2048)
-		except:
-			self.handle_close()
-			return
-		if len(data) == 0:
-			self.handle_close()
-			return
-		self.got_packet(data, addr)
-
-	def readable(self):
-		if self.state == 'closed':
-			return False
-		return True
-
-	def writable(self):
-		return False
 
 	def got_packet(self, recvbuf, addr):
 		if len(recvbuf) < 4 + 12 + 4 + 4:
