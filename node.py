@@ -197,6 +197,8 @@ class NodeConn(Greenlet):
 		self.last_sent = time.time()
 
 	def got_message(self, command, message):
+		gevent.sleep()
+
 		if verbose_recvmsg(command):
 			self.log.write("RECV %s %s" % (command, str(message)))
 
@@ -380,11 +382,9 @@ if __name__ == '__main__':
 	rpcserver = gevent.pywsgi.WSGIServer(('', settings['rpcport']),
 						rpcexec.handle_request)
 	t = gevent.Greenlet(rpcserver.serve_forever)
-	t.start()
 	threads.append(t)
 
 	dht = dht.DHT(log, settings['dhtport'], NODE_ID)
-	dht.start()
 	threads.append(dht)
 
 	if settings['listen']:
@@ -392,18 +392,22 @@ if __name__ == '__main__':
 				       settings['listen_port'],
 				       log, peermgr)
 
-		p2pserver.start()
 		threads.append(p2pserver)
 
 	# connect to specified remote node
 	if addnode:
 		c = peermgr.add(settings['host'], settings['port'])
-		c.start()
 		threads.append(c)
 
 	# program main loop
-	def shutdown():
-		for t in threads: t.kill()
-	gevent.signal(signal.SIGINT, shutdown)
-	gevent.joinall(threads)
+	def start(timeout=None):
+		for t in threads: t.start()
+		try:
+			gevent.joinall(threads,timeout=timeout,
+				       raise_error=True)
+		finally:
+			for t in threads: t.kill()
+			gevent.joinall(threads)
+
+	start()
 
