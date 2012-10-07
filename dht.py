@@ -22,6 +22,8 @@ import datetime
 import asyncore
 import hashlib
 import random
+import struct
+import time
 
 import codec_pb2
 import LRU
@@ -47,10 +49,10 @@ def valid_key_len(n):
 	return False
 
 def matching_bits(v1, v2):
-	for i in xrange(v1.bit_length):
+	for i in xrange(v1.bit_length()):
 		if ((v1 & (1 << i)) != (v2 & (1 << i))):
 			return i
-	return v1.bit_length
+	return v1.bit_length()
 
 def bn2bin(v):
 	s = bytearray()
@@ -235,7 +237,7 @@ class DHTRouter(object):
 		     len(node_msgobj.ip) != 16) or
 		    node_msgobj.port < 1 or
 		    node_msgobj.port > 65535):
-			return
+			return -1
 
 		node = DHTNode(node_msgobj.node_id,
 			       node_msgobj.ip,
@@ -244,14 +246,18 @@ class DHTRouter(object):
 
 		# pick bucket based on number of matching bits
 		# in node idx
-		node.bucket_idx = matching_bits(self.node_id,
+		node.bucket_idx = matching_bits(self.dht.node_id,
 						node_msgobj.node_id)
+
+		# special case: ourselves, 64 matching bits
+		if node.bucket_idx == 64:
+			node.bucket_idx = 63
 
 		addr_tup = (node.ip, node.port)
 
 		if (addr_tup in self.all_nodes or
 		    node.node_id in self.dht_nodes):
-			return
+			return 0
 
 		# store in ip-indexed master list
 		self.all_nodes[addr_tup] = node
@@ -262,6 +268,8 @@ class DHTRouter(object):
 
 		# make node active, if possible
 		self.promote_node(bucket, node)
+
+		return 1
 
 	def demote_node(self, bucket, node):
 		if (not node.active or
@@ -348,12 +356,18 @@ class DHT(Greenlet):
 		# add ourselves to the router
 		node_msgobj = codec_pb2.MsgDHTNode()
 		node_msgobj.node_id = node_id
-		node_msgobj.ip = "127.0.0.1"	# FIXME
+		node_msgobj.ip = socket.inet_pton(socket.AF_INET, "127.0.0.1")
 		node_msgobj.port = bindport
-		self.dht_router.add_node(node_msgobj)
+		rc = self.dht_router.add_node(node_msgobj)
+		if rc < 0:
+			self.log.write("DHT: failed to add node %s %d" %
+					("127.0.0.1", bindport))
 
 	def _run(self):
+		self.bootstrap()
+
 		while True:
+			self.log.write("DHT: running")
 			try:
 				msg, address = self.sock.recvfrom(16384)
 				self.got_packet(msg, address)
@@ -374,7 +388,7 @@ class DHT(Greenlet):
 	def got_packet(self, recvbuf, addr):
 		if debugdht:
 			self.log.write("DHT pktsz " + str(len(recvbuf)) +
-				       addr)
+				       str(addr))
 		if len(recvbuf) < 4 + 12 + 4 + 4:
 			return
 		if recvbuf[:4] != 'DHT1':
@@ -434,7 +448,7 @@ class DHT(Greenlet):
 		tmsg += h[:4]
 
 		tmsg += data
-		self.sendto(tmsg, addr)
+		self.sock.sendto(tmsg, addr)
 		self.last_sent = time.time()
 
 	def got_message(self, command, message, addr):
@@ -480,7 +494,11 @@ class DHT(Greenlet):
 		msgout = codec_pb2.MsgDHTMisc()
 		msgout.request_id = task.task_id
 
-		addr_tup = (node.ip, node.port)
+		if len(node.ip) == 4:
+			node_ip = socket.inet_ntop(socket.AF_INET, node.ip)
+		else:
+			node_ip = socket.inet_ntop(socket.AF_INET6, node.ip)
+		addr_tup = (node_ip, node.port)
 
 		task.addr = addr_tup
 		task.msg_start = msgout
@@ -550,9 +568,11 @@ class DHT(Greenlet):
 		self.op_find_nodes(message, addr)
 
 	def bootstrap(self):
+		self.log.write("DHT: bootstrapping")
+
 		# send message to nearest nodes (possibly only a handful
 		# of DNS bootstrap nodes)
-		for node in self.all_nodes:
+		for node in self.dht_router.all_nodes.itervalues():
 			# do not send to ourselves
 			if node.node_id == self.node_id:
 				continue
@@ -563,7 +583,11 @@ class DHT(Greenlet):
 		port = int(port_in)
 
 		node_msgobj = codec_pb2.MsgDHTNode()
-		node_msgobj.ip = addr
+		node_msgobj.ip = socket.inet_pton(socket.AF_INET, addr)
 		node_msgobj.port = port
-		self.dht_router.add_node(node_msgobj)
+		rc = self.dht_router.add_node(node_msgobj)
+
+		if rc < 0:
+			self.log.write("DHT: failed to add node %s %s" %
+					(addr, port_in))
 
