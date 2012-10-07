@@ -386,6 +386,10 @@ if __name__ == '__main__':
 	dht = dht.DHT(log, settings['dhtport'], NODE_ID)
 	threads.append(dht)
 
+	if ('dht_add_host' in settings and
+	    'dht_add_port' in settings):
+		dht.add_node(settings['dht_add_host'], settings['dht_add_port'])
+
 	if settings['listen']:
 		p2pserver = NodeServer(settings['listen_host'],
 				       settings['listen_port'],

@@ -33,6 +33,14 @@ def verbose_sendmsg(command):
 		return True
 	return True
 
+def verbose_recvmsg(command):
+	skipmsg = { }
+	if debugdht:
+		return True
+	if command in skipmsg:
+		return False
+	return True
+
 def valid_key_len(n):
 	if n == 20 or n == 32 or n == 64:
 		return True
@@ -337,6 +345,13 @@ class DHT(Greenlet):
 		self.log.write(self.dstaddr + ':' + str(self.bindport) +
 			       " open DHT")
 
+		# add ourselves to the router
+		node_msgobj = codec_pb2.MsgDHTNode()
+		node_msgobj.node_id = node_id
+		node_msgobj.ip = "127.0.0.1"	# FIXME
+		node_msgobj.port = bindport
+		self.dht_router.add_node(node_msgobj)
+
 	def _run(self):
 		while True:
 			try:
@@ -357,6 +372,9 @@ class DHT(Greenlet):
 			pass
 
 	def got_packet(self, recvbuf, addr):
+		if debugdht:
+			self.log.write("DHT pktsz " + str(len(recvbuf)) +
+				       addr)
 		if len(recvbuf) < 4 + 12 + 4 + 4:
 			return
 		if recvbuf[:4] != 'DHT1':
@@ -540,4 +558,12 @@ class DHT(Greenlet):
 				continue
 
 			self.ping_node(node)
+
+	def add_node(self, addr, port_in):
+		port = int(port_in)
+
+		node_msgobj = codec_pb2.MsgDHTNode()
+		node_msgobj.ip = addr
+		node_msgobj.port = port
+		self.dht_router.add_node(node_msgobj)
 
