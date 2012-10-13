@@ -1,7 +1,28 @@
 
-Distributed bond markets client.
+Various distributed bond, smart property and smartcoin work.
 
-Skeleton right now.
+See https://bitcointalk.org/index.php?topic=92421.0 for background.
 
-Working on something like https://bitcointalk.org/index.php?topic=92421.0
+Top-level programs:
+
+	node.py: financial P2P network and DHT client
+	smartcoin: tool for querying and creating smartcoin/bond transactions
+
+smartcoin requires TWO wallets, and therefore, TWO bitcoind RPC nodes.  The
+RPC host/port/login information is stored in smartcoin.cfg.  Both
+smartcoin.cfg and the command line are key=value lists.
+
+smartcoin command line usage:
+
+Create a new issue in the database, from the given JSON input:
+$ ./smartcoin mode=create f=issue-data.json
+
+Delete an issue from the database, given the issue id:
+$ ./smartcoin mode=delete id=issue_id
+
+Display an issue, given the issue id:
+$ ./smartcoin mode=show id=issue_id
+
+Display all known issue ids:
+$ ./smartcoin mode=issues
 
