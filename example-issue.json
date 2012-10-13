@@ -1,15 +1,15 @@
 {
   'outpoint' : {
-  	'tx_hash' : 'abcd1234...',
+  	'tx_hash' : 'abcd1234',
 	'index' : 0
   },
 
   'issuer' : {
-  	'pubkey' : 'abcd1234...',
+  	'pubkey' : 'abcd1234',
 	'email' : 'foo@example.com',
 	'display_name' : 'my example issuer, inc.',
 	'display_url' : null,
-	'pay_to_script' : 'abcd1234...'
+	'pay_to_script' : 'abcd1234'
   },
 
   'issue_count' : 1000,
