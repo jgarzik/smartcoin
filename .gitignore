@@ -4,3 +4,6 @@ codec_pb2.py
 
 local*.cfg
 
+smartcoin.cfg
+smartcoin.db
+

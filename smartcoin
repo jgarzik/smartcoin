@@ -1,0 +1,107 @@
+#!/usr/bin/python
+#
+# smartcoin
+#
+# Distributed under the MIT/X11 software license, see the accompanying
+# file COPYING or http://www.opensource.org/licenses/mit-license.php.
+#
+
+import sys
+import re
+import gdbm
+
+import scdb
+import scsettings
+import scjson
+import Log
+
+def smartcoin_create(db, log, settings):
+	try:
+		filename = settings.d['f']
+	except KeyError:
+		filename = 'input.json'
+	
+	issue = scjson.json_to_issue(filename)
+	if issue is None:
+		log.write("cannot convert " + filename + " to JSON issue")
+		return
+
+	id = issue.display_shortname
+	if id in db.issues:
+		log.write("issue already exists with that name")
+		return
+	
+	db.put_issue(issue)
+
+	print "OK"
+
+def smartcoin_delete(db, log, settings):
+	try:
+		id = settings.d['id']
+	except KeyError:
+		log.write("Missing 'id' key for deletion")
+		return
+	
+	rc = db.del_issue(id)
+	if rc:
+		print "OK"
+	else:
+		print "FAIL"
+
+def smartcoin_issues(db, log, settings):
+	for name in db.issues:
+		print name
+
+if __name__ == '__main__':
+	settings = scsettings.Settings()
+	settings.read(sys.argv)
+
+	if 'smartcoin_rpchost' not in settings.d:
+		settings.d['smartcoin_rpchost'] = '127.0.0.1'
+	if 'smartcoin_rpcport' not in settings.d:
+		settings.d['smartcoin_rpcport'] = 19332
+
+	if 'payment_rpchost' not in settings.d:
+		settings.d['payment_rpchost'] = '127.0.0.1'
+	if 'payment_rpcport' not in settings.d:
+		settings.d['payment_rpcport'] = 18332
+
+	if 'db' not in settings.d:
+		settings.d['db'] = './smartcoin.db'
+	if 'chain' not in settings.d:
+		settings.d['chain'] = 'testnet3'
+	chain = settings.d['chain']
+	if 'log' not in settings.d or (settings.d['log'] == '-'):
+		settings.d['log'] = None
+
+	if ('smartcoin_rpcuser' not in settings.d or
+	    'smartcoin_rpcpass' not in settings.d or
+	    'payment_rpcuser' not in settings.d or
+	    'payment_rpcpass' not in settings.d):
+		print "You must set the following in config: {payment,smartcoin}_rpc{user,pass}"
+		sys.exit(1)
+
+	settings.d['smartcoin_rpcport'] = int(settings.d['smartcoin_rpcport'])
+	settings.d['payment_rpcport'] = int(settings.d['payment_rpcport'])
+
+	log = Log.Log(settings.d['log'])
+
+	log.write("\n\n\n\n")
+
+	db = scdb.SCDb(settings.d['db'], log)
+
+	if 'mode' in settings.d:
+		mode = settings['mode']
+	elif 'm' in settings.d:
+		mode = settings['m']
+	else:
+		mode = None
+
+	if mode == 'create':
+		smartcoin_create(db, log, settings)
+	elif mode == 'delete':
+		smartcoin_delete(db, log, settings)
+	elif mode == 'issues':
+		smartcoin_issues(db, log, settings)
+
+

@@ -58,3 +58,42 @@ message MsgDHTNodes {
 	repeated MsgDHTNode nodes = 2;
 }
 
+message OutPoint {
+	required bytes tx_hash = 1;
+	required uint32 index = 2;
+}
+
+message Issuer {
+	// identifiers
+	required bytes pubkey = 1;
+	optional string email = 2;
+
+	// Name and website of the issuer as it will appear in
+	// the software, eg, a real name or company name.
+	required string display_name = 3;
+	optional string display_url = 4;
+
+	// The script the issuer wants to receive the payments on.
+	required bytes pay_to_script = 5;
+}
+
+message Issue {
+	required OutPoint start_point = 1;
+	required Issuer issuer = 2;
+	required uint32 issue_count = 3;
+	required uint64 value = 4;
+	required uint64 coupon_value = 5;
+
+	required string display_shortname = 6;
+	required string display_name = 7;
+
+	// You could model more complex repayment schedules in future.
+	required uint64 repayment_value = 8;
+
+	// UNIX time of when the bond was issued.
+	required uint64 timestamp = 9;
+
+	// URL of the peer issuing the bond. This can be
+	// http://<home ip>:12345/ or perhaps a Tor onion address.
+	optional string peer_url = 10;
+}
