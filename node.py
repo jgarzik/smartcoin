@@ -23,6 +23,7 @@ import rpc
 import Log
 import codec_pb2
 import dht
+import p2p
 from coredefs import PROTO_VERSION
 
 MIN_PROTO_VERSION = 10000
@@ -46,26 +47,7 @@ def verbose_recvmsg(command):
 		return False
 	return True
 
-class MsgNull(object):
-	def __init__(self):
-		pass
-	def SerializeToString(self):
-		return ''
-	def ParseFromString(self, data):
-		pass
-	def __str__(self):
-		return "MsgNull()"
-
 class NodeConn(Greenlet):
-	messagemap = {
-		"version",
-		"verack",
-		"ping",
-		"pong",
-		"addr",
-		"getaddr",
-	}
-
 	def __init__(self, log, peermgr, sock=None, dstaddr=None, dstport=None):
 		Greenlet.__init__(self)
 		self.log = log
@@ -153,11 +135,11 @@ class NodeConn(Greenlet):
 				raise ValueError("got bad checksum %s" % repr(self.recvbuf))
 			self.recvbuf = self.recvbuf[4+12+4+4+msglen:]
 
-			if command in self.messagemap:
+			if command in p2p.messagemap:
 				if command == "version":
 					t = codec_pb2.MsgVersion()
 				elif command == "verack":
-					t = MsgNull()
+					t = p2p.MsgNull()
 				elif command == "ping":
 					t = codec_pb2.MsgPingPong()
 				elif command == "pong":
@@ -165,7 +147,7 @@ class NodeConn(Greenlet):
 				elif command == "addr":
 					t = codec_pb2.MsgAddresses()
 				elif command == "getaddr":
-					t = MsgNull()
+					t = p2p.MsgNull()
 
 				try:
 					t.ParseFromString(msg)
@@ -180,19 +162,9 @@ class NodeConn(Greenlet):
 		if verbose_sendmsg(command):
 			self.log.write("SEND %s %s" % (command, str(message)))
 
-		data = message.SerializeToString()
-		tmsg = 'BND1'
-		tmsg += command
-		tmsg += "\x00" * (12 - len(command))
-		tmsg += struct.pack("<I", len(data))
+		data = p2p.message_to_str('BND1', command, message)
 
-		# add checksum
-		th = hashlib.sha256(data).digest()
-		h = hashlib.sha256(th).digest()
-		tmsg += h[:4]
-
-		tmsg += data
-		self.sock.sendall(tmsg)
+		self.sock.sendall(data)
 		self.last_sent = time.time()
 
 	def got_message(self, command, message):
@@ -219,10 +191,10 @@ class NodeConn(Greenlet):
 				msgout = self.version_msg()
 				self.send_message("version", msgout)
 
-			self.send_message("verack", MsgNull())
+			self.send_message("verack", p2p.MsgNull())
 
 		elif command == "verack":
-			self.send_message("getaddr", MsgNull())
+			self.send_message("getaddr", p2p.MsgNull())
 
 		elif command == "ping":
 			msgout = codec_pb2.MsgPingPong()
