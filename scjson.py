@@ -12,21 +12,17 @@ def json_to_issue(obj):
 	issue = codec_pb2.Issue()
 
 	obj_outpt = obj['outpoint']
-	outpt = codec_pb2.OutPoint()
-	outpt.tx_hash = obj_outpt['tx_hash'].decode('hex')
-	outpt.index = obj_outpt['index']
-	issue.start_point = outpt
+	issue.start_point.tx_hash = obj_outpt['tx_hash'].decode('hex')
+	issue.start_point.index = obj_outpt['index']
 
 	obj_issuer = obj['issuer']
-	issuer = codec_pb2.Issuer()
-	issuer.pubkey = obj_issuer['pubkey'].decode('hex')
+	issue.issuer.pubkey = obj_issuer['pubkey'].decode('hex')
 	if 'email' in obj_issuer:
-		issuer.email = obj_issuer['email']
-	issuer.display_name = obj_issuer['display_name']
+		issue.issuer.email = obj_issuer['email']
+	issue.issuer.display_name = obj_issuer['display_name']
 	if 'display_url' in obj_issuer:
-		issuer.display_url = obj_issuer['display_url']
-	issuer.pay_to_script = obj_issuer['pay_to_script'].decode('hex')
-	issue.issuer = issuer
+		issue.issuer.display_url = obj_issuer['display_url']
+	issue.issuer.pay_to_script = obj_issuer['pay_to_script'].decode('hex')
 
 	issue.issue_count = obj['issue_count']
 	issue.value = obj['value']
@@ -46,7 +42,7 @@ def jsonfile_to_issue(filename):
 		obj = json.load(f)
 	except OSError, IOError:
 		return None
-	
+
 	try:
 		issue = json_to_issue(obj)
 	except KeyError:

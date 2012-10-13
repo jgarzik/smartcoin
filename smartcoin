@@ -21,7 +21,7 @@ def smartcoin_create(db, log, settings):
 	except KeyError:
 		filename = 'input.json'
 	
-	issue = scjson.json_to_issue(filename)
+	issue = scjson.jsonfile_to_issue(filename)
 	if issue is None:
 		log.write("cannot convert " + filename + " to JSON issue")
 		return
@@ -47,6 +47,19 @@ def smartcoin_delete(db, log, settings):
 		print "OK"
 	else:
 		print "FAIL"
+
+def smartcoin_show(db, log, settings):
+	try:
+		id = settings.d['id']
+	except KeyError:
+		log.write("Missing 'id' key for show")
+		return
+	
+	issue = db.get_issue(id)
+	if not issue:
+		print "FAIL"
+	
+	print str(issue)
 
 def smartcoin_issues(db, log, settings):
 	for name in db.issues:
@@ -91,9 +104,9 @@ if __name__ == '__main__':
 	db = scdb.SCDb(settings.d['db'], log)
 
 	if 'mode' in settings.d:
-		mode = settings['mode']
+		mode = settings.d['mode']
 	elif 'm' in settings.d:
-		mode = settings['m']
+		mode = settings.d['m']
 	else:
 		mode = None
 
@@ -101,6 +114,8 @@ if __name__ == '__main__':
 		smartcoin_create(db, log, settings)
 	elif mode == 'delete':
 		smartcoin_delete(db, log, settings)
+	elif mode == 'show':
+		smartcoin_show(db, log, settings)
 	elif mode == 'issues':
 		smartcoin_issues(db, log, settings)
 
