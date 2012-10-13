@@ -434,7 +434,7 @@ class DHT(Greenlet):
 
 	def send_message(self, command, message, addr):
 		if verbose_sendmsg(command):
-			self.log.write("SEND %s %s" % (command, str(message)))
+			self.log.write("DHTSEND %s %s" % (command, str(message)))
 
 		data = message.SerializeToString()
 		tmsg = 'DHT1'
@@ -453,7 +453,7 @@ class DHT(Greenlet):
 
 	def got_message(self, command, message, addr):
 		if verbose_recvmsg(command):
-			self.log.write("RECV %s %s" % (command, str(message)))
+			self.log.write("DHTRECV %s %s" % (command, str(message)))
 
 		if command == "ping":
 			msgout = codec_pb2.MsgDHTPong()
