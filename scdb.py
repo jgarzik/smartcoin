@@ -68,5 +68,11 @@ class SCDb(object):
 			self.dbm['issue_list'] = ' '.join(self.issues)
 
 	def del_issue(self, id):
-		return self.del_obj('issue', id)
+		try:
+			self.issues.remove(id)
+		except KeyError:
+			return False
+		self.dbm['issue_list'] = ' '.join(self.issues)
+		self.del_obj('issue', id)
+		return True
 
