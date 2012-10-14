@@ -59,7 +59,7 @@ def smartcoin_show(db, log, settings):
 	if not issue:
 		print "FAIL"
 	
-	print str(issue)
+	print scjson.issue_to_jsonstr(issue)
 
 def smartcoin_issues(db, log, settings):
 	for name in db.issues:

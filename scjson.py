@@ -11,7 +11,7 @@ import codec_pb2
 def json_to_issue(obj):
 	issue = codec_pb2.Issue()
 
-	obj_outpt = obj['outpoint']
+	obj_outpt = obj['start_point']
 	issue.start_point.tx_hash = obj_outpt['tx_hash'].decode('hex')
 	issue.start_point.index = obj_outpt['index']
 
@@ -49,4 +49,50 @@ def jsonfile_to_issue(filename):
 		return None
 	
 	return issue
+
+def issue_to_json(issue):
+	obj = {
+		'start_point' : {
+			'tx_hash' : issue.start_point.tx_hash.encode('hex'),
+			'index' : issue.start_point.index
+		},
+
+		'issuer' : {
+			'pubkey' : issue.issuer.pubkey.encode('hex'),
+			'display_name' : issue.issuer.display_name,
+			'pay_to_script' : issue.issuer.pay_to_script.encode('hex')
+		},
+
+		'issue_count' : issue.issue_count,
+		'value' : issue.value,
+		'coupon_value' : issue.coupon_value,
+		'display_shortname' : issue.display_shortname,
+		'display_name' : issue.display_name,
+		'repayment_value' : issue.repayment_value,
+		'timestamp' : issue.timestamp,
+	}
+	if issue.issuer.HasField('email'):
+		obj['issuer']['email'] = issue.issuer.email
+	if issue.issuer.HasField('display_url'):
+		obj['issuer']['display_url'] = issue.issuer.display_url
+	if issue.HasField('peer_url'):
+		obj['peer_url'] = issue.peer_url
+
+	return obj
+
+def issue_to_jsonfile(filename, issue):
+	obj = issue_to_json(issue)
+
+	try:
+		f = open(filename, "wb")
+		json.dump(obj, f)
+	except OSError, IOError:
+		return False
+	
+	return True
+
+def issue_to_jsonstr(issue):
+	obj = issue_to_json(issue)
+	s = json.dumps(obj, indent=4)
+	return s
 
